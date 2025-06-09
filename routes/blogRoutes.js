@@ -1,10 +1,42 @@
 import express from 'express';
 import BlogPost from '../models/BlogPost.js';
+import { verifyAdmin } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
-// Get all blog posts
-router.get('/posts', async (req, res) => {
+// Public routes (no auth required)
+router.get('/posts/public', async (req, res) => {
+  console.log('GET /api/blog/posts/public - Fetching public posts');
+  try {
+    const posts = await BlogPost.find({ isPublished: true })
+      .sort({ date: -1 })
+      .select('title excerpt date slug category featuredImage tags');
+    console.log(`Found ${posts.length} public posts`);
+    res.json(posts);
+  } catch (error) {
+    console.error('Error fetching public posts:', error);
+    res.status(500).json({ message: 'Error fetching blog posts', error: error.message });
+  }
+});
+
+// Get a single public blog post by slug
+router.get('/posts/:slug/public', async (req, res) => {
+  const { slug } = req.params;
+  try {
+    const post = await BlogPost.findOne({ slug, isPublished: true });
+    if (!post) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+    res.json(post);
+  } catch (error) {
+    console.error('Error fetching public post:', error);
+    res.status(500).json({ message: 'Error fetching blog post', error: error.message });
+  }
+});
+
+// Protected routes (admin only)
+// Get all blog posts (admin)
+router.get('/posts', verifyAdmin, async (req, res) => {
   console.log('GET /api/blog/posts - Fetching all posts');
   try {
     const posts = await BlogPost.find()
@@ -18,8 +50,8 @@ router.get('/posts', async (req, res) => {
   }
 });
 
-// Get a single blog post by slug
-router.get('/posts/:slug', async (req, res) => {
+// Get a single blog post by slug (admin)
+router.get('/posts/:slug', verifyAdmin, async (req, res) => {
   const { slug } = req.params;
   try {
     const post = await BlogPost.findOne({ slug });
@@ -33,8 +65,8 @@ router.get('/posts/:slug', async (req, res) => {
   }
 });
 
-// Create a new blog post
-router.post('/posts', async (req, res) => {
+// Create a new blog post (admin)
+router.post('/posts', verifyAdmin, async (req, res) => {
   console.log('POST /api/blog/posts - Creating new post');
   try {
     const { 
@@ -77,8 +109,8 @@ router.post('/posts', async (req, res) => {
   }
 });
 
-// Update a blog post
-router.put('/posts/:id', async (req, res) => {
+// Update a blog post (admin)
+router.put('/posts/:id', verifyAdmin, async (req, res) => {
   console.log(`PUT /api/blog/posts/${req.params.id} - Updating post`);
   try {
     const { 
@@ -131,8 +163,8 @@ router.put('/posts/:id', async (req, res) => {
   }
 });
 
-// Delete a blog post
-router.delete('/posts/:id', async (req, res) => {
+// Delete a blog post (admin)
+router.delete('/posts/:id', verifyAdmin, async (req, res) => {
   console.log(`DELETE /api/blog/posts/${req.params.id} - Deleting post`);
   try {
     const post = await BlogPost.findByIdAndDelete(req.params.id);
@@ -148,7 +180,7 @@ router.delete('/posts/:id', async (req, res) => {
   }
 });
 
-// Get posts by category
+// Get posts by category (public)
 router.get('/category/:category', async (req, res) => {
   console.log(`GET /api/blog/category/${req.params.category} - Fetching posts by category`);
   try {

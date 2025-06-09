@@ -40,7 +40,7 @@ app.use((req, res, next) => {
 
 // Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/blog', verifyAdmin, blogRoutes);
+app.use('/api/blog', blogRoutes);
 app.use('/api/subscribers', subscriberRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/assessment', assessmentRoutes);
