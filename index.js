@@ -6,6 +6,8 @@ import subscriberRoutes from './routes/subscriberRoutes.js';
 import contactRoutes from './routes/contactRoutes.js';
 import blogRoutes from './routes/blogRoutes.js';
 import assessmentRoutes from './routes/assessmentRoutes.js';
+import authRoutes from './routes/authRoutes.js';
+import { verifyAdmin } from './middleware/authMiddleware.js';
 
 const app = express();
 
@@ -37,7 +39,8 @@ app.use((req, res, next) => {
 });
 
 // Routes
-app.use('/api/blog', blogRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/blog', verifyAdmin, blogRoutes);
 app.use('/api/subscribers', subscriberRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/assessment', assessmentRoutes);
