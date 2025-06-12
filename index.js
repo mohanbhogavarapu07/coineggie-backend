@@ -42,6 +42,29 @@ app.use((req, res, next) => {
   next();
 });
 
+// Root route handler
+app.get('/', (req, res) => {
+  res.json({
+    status: 'ok',
+    message: 'Krishna Kumar API is running',
+    version: '1.0.0',
+    endpoints: {
+      blog: '/api/blog',
+      auth: '/api/auth',
+      subscribers: '/api/subscribers'
+    }
+  });
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
 // Create uploads directory if it doesn't exist
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
@@ -73,13 +96,21 @@ app.use('/api/assessment', assessmentRoutes);
 // 404 handler
 app.use((req, res) => {
   console.log('404 Not Found:', req.method, req.url);
-  res.status(404).json({ message: 'Not Found' });
+  res.status(404).json({ 
+    status: 'error',
+    message: 'Not Found',
+    path: req.url
+  });
 });
 
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Error:', err);
-  res.status(500).json({ message: 'Internal Server Error' });
+  res.status(500).json({ 
+    status: 'error',
+    message: 'Internal Server Error',
+    error: process.env.NODE_ENV === 'development' ? err.message : undefined
+  });
 });
 
 // MongoDB connection
