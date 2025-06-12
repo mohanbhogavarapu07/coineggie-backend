@@ -23,8 +23,15 @@ const __dirname = path.dirname(__filename);
 
 // Middleware
 app.use(cors({
-  origin: ['https://krishnakumar.vercel.app', 'http://localhost:3000'],
-  credentials: true
+  origin: [
+    'https://krishnakumar.vercel.app',
+    'http://localhost:8080',
+    'http://localhost:3000',
+    'http://localhost:8081'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
 
