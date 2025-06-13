@@ -24,6 +24,8 @@ const __dirname = path.dirname(__filename);
 // Middleware
 app.use(cors({
   origin: [
+    'https://thekrishnakumar.com',
+    'https://www.thekrishnakumar.com',
     'https://krishnakumar.vercel.app',
     'http://localhost:8080',
     'http://localhost:3000',
