@@ -1,29 +1,37 @@
-const verifyAdmin = (req, res, next) => {
-  const token = req.headers.authorization?.split(' ')[1];
+import jwt from 'jsonwebtoken';
 
-  if (!token) {
-    return res.status(401).json({ message: 'Authentication required' });
-  }
-
+export const verifyAdmin = (req, res, next) => {
   try {
-    // In production, you should use JWT verification here
-    // For now, we'll just check if the token exists
-    // You might want to add more sophisticated token validation
-    const decodedToken = Buffer.from(token, 'base64').toString();
-    const [email, timestamp] = decodedToken.split('-');
-    
-    // Check if token is expired (24 hours)
-    if (Date.now() - parseInt(timestamp) > 24 * 60 * 60 * 1000) {
-      return res.status(401).json({ message: 'Session expired' });
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ message: 'No token provided' });
     }
 
-    // Add email to request for future use
-    req.adminEmail = email;
-    next();
-  } catch (error) {
-    console.error('Error verifying token:', error);
-    res.status(401).json({ message: 'Invalid token' });
-  }
-};
+    const token = authHeader.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ message: 'No token provided' });
+    }
 
-export { verifyAdmin }; 
+    if (!global.JWT_SECRET) {
+      console.error('JWT_SECRET is not configured');
+      return res.status(500).json({ message: 'Server configuration error' });
+    }
+
+    try {
+      const decoded = jwt.verify(token, global.JWT_SECRET);
+      req.admin = decoded;
+      next();
+    } catch (error) {
+      if (error.name === 'TokenExpiredError') {
+        return res.status(401).json({ message: 'Token expired' });
+      }
+      if (error.name === 'JsonWebTokenError') {
+        return res.status(401).json({ message: 'Invalid token' });
+      }
+      throw error;
+    }
+  } catch (error) {
+    console.error('Auth middleware error:', error);
+    res.status(500).json({ message: 'Authentication error' });
+  }
+}; 

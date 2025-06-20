@@ -7,71 +7,79 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Create uploads directory if it doesn't exist
-const uploadDir = path.join(__dirname, '..', 'uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-  console.log('Created uploads directory at:', uploadDir);
+const uploadsDir = path.join(__dirname, '..', 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
 // Configure storage
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadDir);
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir);
   },
-  filename: function (req, file, cb) {
-    // Create unique filename with original extension
+  filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-    const filename = uniqueSuffix + ext;
-    console.log('Saving file:', {
-      originalName: file.originalname,
-      newName: filename,
-      path: path.join(uploadDir, filename)
-    });
-    cb(null, filename);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
   }
 });
 
-// File filter
-const fileFilter = (req, file, cb) => {
-  // Accept only specific file types
+// File filter for images
+const imageFilter = (req, file, cb) => {
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  if (allowedTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Invalid file type. Only JPEG, PNG, GIF, and WebP images are allowed.'), false);
+  }
+};
+
+// File filter for attachments
+const attachmentFilter = (req, file, cb) => {
   const allowedTypes = [
     'application/pdf',
     'application/msword',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     'text/plain',
     'image/jpeg',
-    'image/png'
+    'image/png',
+    'image/gif',
+    'image/webp'
   ];
-
-  console.log('Processing file:', file.originalname, 'MIME type:', file.mimetype);
-
   if (allowedTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error('Invalid file type. Only PDF, DOC, DOCX, TXT, JPG, and PNG files are allowed.'), false);
+    cb(new Error('Invalid file type. Only PDF, Word, Excel, text, and image files are allowed.'), false);
   }
 };
 
-const upload = multer({
+// Create multer upload instances
+export const uploadImage = multer({
   storage: storage,
-  fileFilter: fileFilter,
+  fileFilter: imageFilter,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB limit
-    files: 5 // Maximum 5 files per upload
+    fileSize: 5 * 1024 * 1024 // 5MB limit for images
+  }
+});
+
+export const uploadAttachments = multer({
+  storage: storage,
+  fileFilter: attachmentFilter,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit for attachments
+    files: 5 // Maximum 5 files
   }
 });
 
 // Error handling middleware
-const handleMulterError = (err, req, res, next) => {
-  console.error('Multer error:', err);
-  
+export const handleMulterError = (err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ message: 'File size too large. Maximum size is 5MB.' });
+      return res.status(400).json({ message: 'File size too large' });
     }
     if (err.code === 'LIMIT_FILE_COUNT') {
-      return res.status(400).json({ message: 'Too many files. Maximum 5 files allowed.' });
+      return res.status(400).json({ message: 'Too many files' });
     }
     return res.status(400).json({ message: err.message });
   }
@@ -79,6 +87,4 @@ const handleMulterError = (err, req, res, next) => {
     return res.status(400).json({ message: err.message });
   }
   next();
-};
-
-export { upload, handleMulterError }; 
+}; 

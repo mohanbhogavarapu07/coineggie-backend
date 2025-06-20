@@ -1,11 +1,14 @@
 import express from 'express';
 import BlogPost from '../models/BlogPost.js';
 import { verifyAdmin } from '../middleware/authMiddleware.js';
-import { upload, handleMulterError } from '../config/fileStorage.js';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import { uploadImage, uploadAttachments, handleMulterError } from '../config/fileStorage.js';
 import fs from 'fs';
 
 const router = express.Router();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Public routes (no auth required)
 router.get('/posts/public', async (req, res) => {
@@ -13,7 +16,7 @@ router.get('/posts/public', async (req, res) => {
   try {
     const posts = await BlogPost.find({ isPublished: true })
       .sort({ date: -1 })
-      .select('title excerpt date slug category featuredImage tags');
+      .select('title description content date slug category image coverImage attachments tags author publishedDate updatedDate readTime');
     console.log(`Found ${posts.length} public posts`);
     res.json(posts);
   } catch (error) {
@@ -44,7 +47,7 @@ router.get('/posts', verifyAdmin, async (req, res) => {
   try {
     const posts = await BlogPost.find()
       .sort({ date: -1 })
-      .select('title excerpt content date slug category readingTime featuredImage tags isPublished publishedAt');
+      .select('title description content date slug category image tags isPublished publishedAt');
     console.log(`Found ${posts.length} posts`);
     res.json(posts);
   } catch (error) {
@@ -70,42 +73,48 @@ router.get('/posts/:slug', verifyAdmin, async (req, res) => {
 
 // Create a new blog post (admin)
 router.post('/posts', verifyAdmin, async (req, res) => {
-  console.log('POST /api/blog/posts - Creating new post');
+  console.log('POST /api/blog/posts - Creating new post with data:', req.body);
   try {
-    const { 
-      title, 
-      content, 
-      excerpt, 
-      isPublished,
-      category,
-      featuredImage,
-      tags,
-      date
-    } = req.body;
-    
-    if (!title || !content || !excerpt) {
-      console.log('Missing required fields');
-      return res.status(400).json({ message: 'Title, content, and excerpt are required' });
+    const postData = {
+      ...req.body,
+      image: req.body.image || req.body.coverImage, // Use either image or coverImage
+      coverImage: req.body.coverImage || req.body.image // Use either coverImage or image
+    };
+
+    // --- Ensure tags is always an array ---
+    if (postData.tags && typeof postData.tags === 'string') {
+      postData.tags = postData.tags.split(',').map(tag => tag.trim()).filter(Boolean);
+    }
+    if (!Array.isArray(postData.tags)) {
+      postData.tags = [];
+    }
+    // ---------------------------------------
+
+    console.log('Processed post data:', postData);
+
+    // Validate required fields
+    if (!postData.title || !postData.content || !postData.description) {
+      return res.status(400).json({ message: 'Title, content, and description are required' });
     }
 
-    const post = new BlogPost({
-      title,
-      content,
-      excerpt,
-      isPublished: isPublished || false,
-      category: category || 'Productivity',
-      featuredImage,
-      tags: tags || [],
-      date: date || new Date()
-    });
+    if (!postData.image || !postData.coverImage) {
+      console.log('Missing image fields:', { image: postData.image, coverImage: postData.coverImage });
+      return res.status(400).json({ message: 'Cover image is required' });
+    }
 
-    await post.save();
-    console.log('Post created successfully:', post.title);
-    res.status(201).json(post);
+    const post = new BlogPost(postData);
+    const savedPost = await post.save();
+    console.log('Post created successfully:', savedPost.title);
+    res.status(201).json(savedPost);
   } catch (error) {
     console.error('Error creating post:', error);
     if (error.code === 11000) {
       res.status(400).json({ message: 'A post with this title already exists' });
+    } else if (error.name === 'ValidationError') {
+      res.status(400).json({ 
+        message: 'Validation error',
+        details: Object.values(error.errors).map(err => err.message)
+      });
     } else {
       res.status(500).json({ message: 'Error creating blog post', error: error.message });
     }
@@ -113,70 +122,97 @@ router.post('/posts', verifyAdmin, async (req, res) => {
 });
 
 // Update a blog post (admin)
-router.put('/posts/:id', verifyAdmin, async (req, res) => {
-  console.log(`PUT /api/blog/posts/${req.params.id} - Updating post`);
+router.put('/posts/:slug', verifyAdmin, async (req, res) => {
+  console.log(`PUT /api/blog/posts/${req.params.slug} - Updating post`);
   try {
-    const { 
-      title, 
-      content, 
-      excerpt, 
-      isPublished,
-      category,
-      featuredImage,
-      tags,
-      date,
-      publishedAt
-    } = req.body;
-    
-    if (!title || !content || !excerpt) {
-      console.log('Missing required fields');
-      return res.status(400).json({ message: 'Title, content, and excerpt are required' });
+    const updateData = {
+      ...req.body,
+      image: req.body.image || req.body.coverImage, // Use either image or coverImage
+      coverImage: req.body.coverImage || req.body.image, // Use either coverImage or image
+      updatedDate: new Date()
+    };
+
+    // --- Ensure tags is always an array ---
+    if (updateData.tags && typeof updateData.tags === 'string') {
+      updateData.tags = updateData.tags.split(',').map(tag => tag.trim()).filter(Boolean);
+    }
+    if (!Array.isArray(updateData.tags)) {
+      updateData.tags = [];
+    }
+    // ---------------------------------------
+
+    // Validate required fields
+    if (!updateData.title || !updateData.content || !updateData.description) {
+      return res.status(400).json({ message: 'Title, content, and description are required' });
     }
 
-    const post = await BlogPost.findById(req.params.id);
+    if (!updateData.image || !updateData.coverImage) {
+      return res.status(400).json({ message: 'Cover image is required' });
+    }
+
+    const post = await BlogPost.findOneAndUpdate(
+      { slug: req.params.slug },
+      updateData,
+      { new: true, runValidators: true }
+    );
+
     if (!post) {
       console.log('Post not found');
       return res.status(404).json({ message: 'Blog post not found' });
     }
 
-    post.title = title;
-    post.content = content;
-    post.excerpt = excerpt;
-    post.isPublished = isPublished;
-    post.category = category || post.category;
-    post.featuredImage = featuredImage || post.featuredImage;
-    post.tags = tags || post.tags;
-    post.date = date || post.date;
-    
-    // Update publishedAt if post is being published
-    if (isPublished && !post.publishedAt) {
-      post.publishedAt = new Date();
-    }
-
-    await post.save();
     console.log('Post updated successfully:', post.title);
     res.json(post);
   } catch (error) {
     console.error('Error updating post:', error);
     if (error.code === 11000) {
       res.status(400).json({ message: 'A post with this title already exists' });
+    } else if (error.name === 'ValidationError') {
+      res.status(400).json({ message: error.message });
     } else {
       res.status(500).json({ message: 'Error updating blog post', error: error.message });
     }
   }
 });
 
-// Delete a blog post (admin)
-router.delete('/posts/:id', verifyAdmin, async (req, res) => {
-  console.log(`DELETE /api/blog/posts/${req.params.id} - Deleting post`);
+// Delete a blog post
+router.delete('/posts/:identifier', verifyAdmin, async (req, res) => {
   try {
-    const post = await BlogPost.findByIdAndDelete(req.params.id);
+    const { identifier } = req.params;
+    console.log('Attempting to delete post with identifier:', identifier);
+
+    // Try to find the post by ID first, then by slug
+    let post = await BlogPost.findById(identifier);
     if (!post) {
-      console.log('Post not found');
+      post = await BlogPost.findOne({ slug: identifier });
+    }
+
+    if (!post) {
+      console.log('Post not found:', identifier);
       return res.status(404).json({ message: 'Blog post not found' });
     }
-    console.log('Post deleted successfully:', post.title);
-    res.json({ message: 'Blog post deleted successfully' });
+
+    // Delete associated files
+    if (post.image) {
+      const imagePath = path.join(__dirname, '..', 'uploads', path.basename(post.image));
+      if (fs.existsSync(imagePath)) {
+        fs.unlinkSync(imagePath);
+      }
+    }
+
+    if (post.attachments && post.attachments.length > 0) {
+      post.attachments.forEach(attachment => {
+        const filePath = path.join(__dirname, '..', 'uploads', path.basename(attachment.url));
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      });
+    }
+
+    // Delete the post
+    await BlogPost.deleteOne({ _id: post._id });
+    console.log('Post deleted successfully:', post._id);
+    res.json({ message: 'Post deleted successfully' });
   } catch (error) {
     console.error('Error deleting post:', error);
     res.status(500).json({ message: 'Error deleting blog post', error: error.message });
@@ -198,66 +234,57 @@ router.get('/category/:category', async (req, res) => {
   }
 });
 
-// File upload route
-router.post('/upload', verifyAdmin, upload.array('files', 5), async (req, res) => {
-  console.log('Upload route hit:', {
-    files: req.files,
-    body: req.body
-  });
+// Upload cover image
+router.post('/upload-image', verifyAdmin, uploadImage.single('image'), handleMulterError, async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: 'No file uploaded' });
+    }
 
+    const imageUrl = `/uploads/${req.file.filename}`;
+    console.log('Image uploaded successfully:', imageUrl);
+    
+    res.json({ 
+      success: true, 
+      message: 'Image uploaded successfully',
+      imageUrl 
+    });
+  } catch (error) {
+    // Delete the uploaded file if there's an error
+    if (req.file) {
+      fs.unlinkSync(req.file.path);
+    }
+    console.error('Error uploading image:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Upload attachments
+router.post('/upload-attachments', verifyAdmin, uploadAttachments.array('files', 5), handleMulterError, async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ message: 'No files uploaded' });
     }
 
-    if (!req.body.postId) {
-      // Delete uploaded files if postId is missing
-      req.files.forEach(file => {
-        fs.unlink(file.path, (err) => {
-          if (err) console.error('Error deleting file:', err);
-        });
-      });
-      return res.status(400).json({ message: 'Post ID is required' });
-    }
-
-    const post = await BlogPost.findById(req.body.postId);
-    if (!post) {
-      // Delete uploaded files if post not found
-      req.files.forEach(file => {
-        fs.unlink(file.path, (err) => {
-          if (err) console.error('Error deleting file:', err);
-        });
-      });
-      return res.status(404).json({ message: 'Post not found' });
-    }
-
-    // Add new attachments to the post
-    const newAttachments = req.files.map(file => ({
-      name: file.filename,
-      url: `/api/blog/uploads/${file.filename}`,
+    const attachments = req.files.map(file => ({
+      name: file.originalname,
+      url: `/uploads/${file.filename}`,
       type: file.mimetype
     }));
 
-    console.log('Adding attachments:', newAttachments);
-
-    post.attachments = [...(post.attachments || []), ...newAttachments];
-    await post.save();
-
-    res.json({
+    res.json({ 
+      success: true, 
       message: 'Files uploaded successfully',
-      attachments: newAttachments
+      attachments 
     });
   } catch (error) {
-    console.error('Error in upload route:', error);
     // Delete uploaded files if there's an error
     if (req.files) {
       req.files.forEach(file => {
-        fs.unlink(file.path, (err) => {
-          if (err) console.error('Error deleting file:', err);
-        });
+        fs.unlinkSync(file.path);
       });
     }
-    res.status(500).json({ message: 'Error uploading files' });
+    res.status(500).json({ message: error.message });
   }
 });
 
@@ -296,18 +323,33 @@ router.delete('/posts/:postId/attachments/:attachmentId', verifyAdmin, async (re
 
 // Serve uploaded files
 router.get('/uploads/:filename', (req, res) => {
-  const filename = req.params.filename;
-  const filePath = path.join(process.cwd(), 'uploads', filename);
-  
-  console.log('Serving file:', filename);
-  console.log('File path:', filePath);
-  
-  if (!fs.existsSync(filePath)) {
-    console.error('File not found:', filePath);
-    return res.status(404).json({ message: 'File not found' });
+  const filePath = path.join(__dirname, '..', 'uploads', req.params.filename);
+  if (fs.existsSync(filePath)) {
+    res.sendFile(filePath);
+  } else {
+    res.status(404).json({ message: 'File not found' });
   }
+});
 
-  res.sendFile(filePath);
+// Get related posts
+router.get('/:slug/related', async (req, res) => {
+  try {
+    const post = await BlogPost.findOne({ slug: req.params.slug });
+    if (!post) {
+      return res.status(404).json({ message: 'Blog post not found' });
+    }
+
+    const relatedPosts = await BlogPost.find({
+      category: post.category,
+      slug: { $ne: post.slug }
+    })
+    .limit(3)
+    .select('title slug description publishedDate readTime category author image tags');
+
+    res.json(relatedPosts);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
 });
 
 export default router; 

@@ -5,32 +5,26 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import dotenv from 'dotenv';
+import crypto from 'crypto';
 import subscriberRoutes from './routes/subscriberRoutes.js';
 import contactRoutes from './routes/contactRoutes.js';
 import blogRoutes from './routes/blogRoutes.js';
 import assessmentRoutes from './routes/assessmentRoutes.js';
 import authRoutes from './routes/authRoutes.js';
 import { verifyAdmin } from './middleware/authMiddleware.js';
+import { dirname, join } from 'path';
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Get __dirname equivalent in ES modules
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 // Middleware
 app.use(cors({
-  origin: [
-    'https://thekrishnakumar.com',
-    'https://www.thekrishnakumar.com',
-    'https://krishnakumar.vercel.app',
-    'http://localhost:8080',
-    'http://localhost:3000',
-    'http://localhost:8081'
-  ],
+  origin: ['http://localhost:8080', 'http://localhost:3000'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -68,22 +62,34 @@ app.get('/health', (req, res) => {
 });
 
 // Create uploads directory if it doesn't exist
-const uploadsDir = path.join(__dirname, 'uploads');
+const uploadsDir = join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
   console.log('Created uploads directory at:', uploadsDir);
 }
 
-// Serve static files from uploads directory
-app.use('/api/blog/uploads', express.static(uploadsDir));
-console.log('Serving static files from:', uploadsDir);
+// Serve static files from uploads directory with proper MIME types
+app.use('/uploads', express.static(uploadsDir, {
+  setHeaders: (res, path) => {
+    if (path.endsWith('.png')) {
+      res.set('Content-Type', 'image/png');
+    } else if (path.endsWith('.jpg') || path.endsWith('.jpeg')) {
+      res.set('Content-Type', 'image/jpeg');
+    } else if (path.endsWith('.gif')) {
+      res.set('Content-Type', 'image/gif');
+    } else if (path.endsWith('.webp')) {
+      res.set('Content-Type', 'image/webp');
+    }
+  }
+}));
 
 // Add logging middleware for file requests
-app.use('/api/blog/uploads', (req, res, next) => {
+app.use('/uploads', (req, res, next) => {
   console.log('File request:', {
     method: req.method,
     url: req.url,
-    path: path.join(uploadsDir, req.url)
+    path: path.join(uploadsDir, req.url),
+    exists: fs.existsSync(path.join(uploadsDir, req.url))
   });
   next();
 });
@@ -105,28 +111,32 @@ app.use((req, res) => {
   });
 });
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error('Error:', err);
-  res.status(500).json({ 
-    status: 'error',
-    message: 'Internal Server Error',
-    error: process.env.NODE_ENV === 'development' ? err.message : undefined
-  });
-});
-
 // MongoDB connection
-mongoose.connect(process.env.MONGODB_URI)
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/digit-sage';
+mongoose.connect(MONGODB_URI)
   .then(() => {
-    console.log('Connected to MongoDB successfully');
+    console.log('Connected to MongoDB');
     console.log('Database:', mongoose.connection.name);
   })
   .catch((err) => {
     console.error('MongoDB connection error:', err);
   });
 
+// JWT Secret configuration
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
+if (!process.env.JWT_SECRET) {
+  console.warn('Warning: JWT_SECRET not found in environment variables. Using a random secret that will change on server restart.');
+}
+global.JWT_SECRET = JWT_SECRET;
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ message: 'Something went wrong!' });
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
-  console.log(`API available at https://kk-backend-wra3.onrender.com`);
+  console.log(`API available at http://localhost:${PORT}`);
 }); 
